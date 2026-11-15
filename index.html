@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>책장 · TXT 이북 리더</title>
+<meta name="description" content="TXT 파일을 끌어다 놓으면 이북처럼 읽을 수 있는 브라우저 리더">
+<meta name="theme-color" content="#34508f">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2334508f'/%3E%3Cpath d='M32 18c-5-3-12-4-20-3v31c8-1 15 0 20 3 5-3 12-4 20-3V15c-8-1-15 0-20 3z' fill='%23f2f3ef'/%3E%3Cpath d='M32 18v31' stroke='%2334508f' stroke-width='2.5'/%3E%3Cpath d='M17 23c4-.5 8 0 11 1.5M17 30c4-.5 8 0 11 1.5M36 24.5c3-1.5 7-2 11-1.5M36 31.5c3-1.5 7-2 11-1.5' stroke='%239aa9cf' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=Hahmlet:wght@300;400;500;700&family=IBM+Plex+Sans+KR:wght@300;400;500;700&family=Nanum+Gothic:wght@400;700&family=Nanum+Myeongjo:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&family=Noto+Serif+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#f2f3ef;--fg:#262a2f;--mut:#7b8088;--bar:rgba(242,243,239,.9);--line:#d9dbd5;--acc:#34508f;--sel:#c9d5f0;
@@ -62,6 +65,13 @@ button.on{border-color:var(--acc);color:var(--acc)}
 .themes{display:flex;gap:8px;grid-column:2/4}
 .themes button{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);padding:0}
 .themes button.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--bg) inset}
+#qList{max-height:190px;overflow-y:auto;margin:0 0 12px;border:1px solid var(--line);border-radius:8px;display:none;scrollbar-width:thin}
+#qList:not(:empty){display:block}
+#qList button{display:block;width:100%;text-align:left;border-radius:0;font-size:12.5px;line-height:1.45;padding:7px 10px;border:0;border-bottom:1px solid var(--line)}
+#qList button b{color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,transparent);font-weight:700}
+#qList button.cur{background:color-mix(in srgb,var(--acc) 10%,transparent)}
+.sdiv{border:0;border-top:1px solid var(--line);margin:4px 0 12px}
+::highlight(cur){background:#ffd54a;color:#1c1c1c}
 #welcome{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:var(--bg);text-align:center;padding:24px}
 #welcome.hide{display:none}
 #dz{width:min(560px,90vw);padding:56px 24px;border:2px dashed var(--line);border-radius:16px;transition:.2s}
@@ -95,6 +105,10 @@ button.on{border-color:var(--acc);color:var(--acc)}
 </footer>
 
 <section id="panel" aria-label="읽기 설정">
+  <div class="row"><label>검색</label><input type="text" id="qIn" placeholder="본문에서 찾기 (Ctrl+F)" spellcheck="false"></div>
+  <div class="row" style="display:flex;gap:6px"><span id="qCnt" style="flex:1;font-size:12px;color:var(--mut)"></span><button id="qPrev">이전</button><button id="qNext">다음</button></div>
+  <div id="qList"></div>
+  <hr class="sdiv">
   <div class="row"><label>글꼴</label>
     <select id="sFont">
       <optgroup label="명조 (세리프)"><option value="serif">본명조</option><option value="myeong">나눔명조</option><option value="gowunb">고운바탕</option><option value="hahmlet">함렛</option></optgroup>
@@ -291,7 +305,7 @@ function render(text,title){
     if(hd){t=t.slice(S.join?1:0);out.push(`<h2 data-i="${n++}">${esc(t)}</h2>`);chs.push(t)}
     else{out.push(`<p data-p="${pi++}">${esc(t)}</p>`);paras.push(t)}
   }
-  book.innerHTML=out.join('');
+  book.innerHTML=out.join('');clearSearch();
   heads=[...book.querySelectorAll('h2')];
   $('#name').textContent=title;document.title=title+' · 책장';
   toc.innerHTML='<h3>목차</h3>'+(chs.length?chs.map((t,i)=>`<button data-i="${i}">${esc(t)}</button>`).join(''):'<p>감지된 챕터가 없습니다.<br>아래 슬라이더로 이동하세요.</p>');
@@ -402,6 +416,48 @@ function wake(){
 }
 addEventListener('mousemove',wake);addEventListener('keydown',wake);
 document.addEventListener('pointerdown',e=>{if(!e.target.closest('#panel,#bSet'))$('#panel').classList.remove('open')});
+/* ---------- 본문 검색 ---------- */
+let hits=[],hi=-1,lastQ='',qt;
+const qIn=$('#qIn'),qList=$('#qList'),qCnt=$('#qCnt'),MAXHIT=500,HL_OK=!!(window.CSS&&CSS.highlights&&window.Highlight);
+function clearSearch(){hits=[];hi=-1;lastQ='';qList.innerHTML='';qCnt.textContent='';if(HL_OK)CSS.highlights.delete('cur')}
+function search(){
+  const q=qIn.value.trim().toLowerCase();clearSearch();lastQ=qIn.value;
+  if(!loaded||!q)return;
+  outer:for(let i=0;i<paras.length;i++){
+    const low=paras[i].toLowerCase();let p=low.indexOf(q);
+    while(p>=0){hits.push({i,p});if(hits.length>=MAXHIT)break outer;p=low.indexOf(q,p+q.length)}
+  }
+  qCnt.textContent=hits.length?hits.length+(hits.length>=MAXHIT?'+':'')+'건':'결과 없음';
+  const frag=document.createDocumentFragment();
+  hits.forEach((h,k)=>{
+    const t=paras[h.i],b=document.createElement('button'),s=Math.max(0,h.p-18),e=Math.min(t.length,h.p+q.length+32),m=document.createElement('b');
+    b.dataset.k=k;m.textContent=t.slice(h.p,h.p+q.length);
+    b.append((s?'…':'')+t.slice(s,h.p),m,t.slice(h.p+q.length,e)+(e<t.length?'…':''));frag.append(b);
+  });
+  qList.append(frag);
+}
+function goHit(k){
+  if(k<0||k>=hits.length)return;hi=k;
+  qList.querySelectorAll('.cur').forEach(x=>x.classList.remove('cur'));
+  const b=qList.children[k];if(b){b.classList.add('cur');b.scrollIntoView({block:'nearest'})}
+  const h=hits[k],p=book.querySelector(`p[data-p="${h.i}"]`),n=p&&p.firstChild;if(!n)return;
+  const r=document.createRange();r.setStart(n,h.p);r.setEnd(n,Math.min(n.length,h.p+lastQ.trim().length));
+  const rc=r.getBoundingClientRect(),bk=book.getBoundingClientRect(),sg=stage.getBoundingClientRect();
+  if(S.mode==='page')book.scrollTo({left:Math.max(0,Math.floor((rc.left-bk.left+book.scrollLeft)/step))*step});
+  else stage.scrollTo({top:rc.top-sg.top+stage.scrollTop-stage.clientHeight*.3,behavior:'smooth'});
+  if(HL_OK)CSS.highlights.set('cur',new Highlight(r));
+  else{const sel=getSelection();sel.removeAllRanges();sel.addRange(r)}
+  qCnt.textContent=(k+1)+' / '+hits.length+(hits.length>=MAXHIT?'+':'');
+}
+const stepHit=d=>{if(qIn.value!==lastQ)search();if(!hits.length)return;goHit(d>0?(hi+1)%hits.length:(hi<=0?hits.length-1:hi-1))};
+qIn.oninput=()=>{clearTimeout(qt);qt=setTimeout(search,250)};
+qIn.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();stepHit(e.shiftKey?-1:1)}};
+$('#qNext').onclick=()=>stepHit(1);
+$('#qPrev').onclick=()=>stepHit(-1);
+qList.onclick=e=>{const b=e.target.closest('button');if(b)goHit(+b.dataset.k)};
+addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&loaded){e.preventDefault();$('#panel').classList.add('open');qIn.focus();qIn.select()}
+});
 applySet();
 </script>
 </body>
